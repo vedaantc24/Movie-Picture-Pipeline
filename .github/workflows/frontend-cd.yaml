@@ -1,0 +1,130 @@
+name: Frontend Continuous Deployment
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'starter/frontend/**'
+      - '.github/workflows/frontend-cd.yaml'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: starter/frontend/.nvmrc
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: starter/frontend/node_modules
+          key: frontend-node-${{ runner.os }}-${{ hashFiles('starter/frontend/package-lock.json') }}
+          restore-keys: |
+            frontend-node-${{ runner.os }}-
+
+      - name: Install dependencies
+        working-directory: starter/frontend
+        run: npm ci
+
+      - name: Run lint
+        working-directory: starter/frontend
+        run: npm run lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: starter/frontend/.nvmrc
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: starter/frontend/node_modules
+          key: frontend-node-${{ runner.os }}-${{ hashFiles('starter/frontend/package-lock.json') }}
+          restore-keys: |
+            frontend-node-${{ runner.os }}-
+
+      - name: Install dependencies
+        working-directory: starter/frontend
+        run: npm ci
+
+      - name: Run tests
+        working-directory: starter/frontend
+        run: CI=true npm test
+
+  build-and-deploy:
+    name: Build and Deploy
+    needs:
+      - lint
+      - test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Validate backend URL
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+        run: |
+          if [ -z "$BACKEND_URL" ]; then
+            echo "BACKEND_URL repository variable is not configured."
+            exit 1
+          fi
+
+      - name: Build and push Docker image
+        working-directory: starter/frontend
+        env:
+          ECR_REPOSITORY: 625628355693.dkr.ecr.us-east-1.amazonaws.com/frontend
+          IMAGE_TAG: ${{ github.sha }}
+          REACT_APP_MOVIE_API_URL: ${{ vars.BACKEND_URL }}
+        run: |
+          docker build \
+            --build-arg REACT_APP_MOVIE_API_URL="$REACT_APP_MOVIE_API_URL" \
+            --tag "$ECR_REPOSITORY:$IMAGE_TAG" \
+            .
+          docker push "$ECR_REPOSITORY:$IMAGE_TAG"
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --region us-east-1 \
+            --name cluster
+
+      - name: Deploy frontend to EKS
+        env:
+          ECR_REPOSITORY: 625628355693.dkr.ecr.us-east-1.amazonaws.com/frontend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd starter/frontend/k8s
+          kustomize edit set image frontend="$ECR_REPOSITORY:$IMAGE_TAG"
+          kustomize build | kubectl apply -f -
+
+      - name: Verify frontend deployment
+        run: |
+          kubectl rollout status deployment/frontend --timeout=300s
+          kubectl get deployment frontend
+          kubectl get service frontend
