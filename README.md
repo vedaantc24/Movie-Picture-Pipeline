@@ -1,3 +1,10 @@
+# For Reviewer
+
+1. All screenshots are available in the `screenshots` folder.
+2. Frontend URL [Application]: http://af3a49292c73c43a59d4081094d619a4-314616559.us-east-1.elb.amazonaws.com/
+3. Backend LoadBalancer URL [Backend `/movies` API]: http://aac41343234d44d2c8057f3e7d5cd469-805214327.us-east-1.elb.amazonaws.com/movies
+
+
 # Movie Picture Pipeline
 
 You've been brought on as the DevOps resource for a development team that manages a web application that is a catalog of Movie Picture movies. They're in dire need of automating their development workflows in hopes of accelerating their release cycle. They'd like to use Github Actions to automate testing, building and deploying their applications to an existing Kubernetes cluster.
